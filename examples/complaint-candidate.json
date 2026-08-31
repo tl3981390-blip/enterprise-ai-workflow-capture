@@ -1,0 +1,17 @@
+{
+  "task_type": "customer-complaint-response",
+  "task_goal": "Analyze a delivery complaint and draft an accurate response",
+  "process_summary": "The employee supplied the complaint and policy, corrected a delivery-date error, and adopted the revised reply.",
+  "prerequisites": ["complaint summary", "refund policy", "verified delivery date"],
+  "steps": [
+    {"actor": "human", "event_type": "action", "summary": "Provided the complaint and response policy.", "provenance": "observed", "metadata": {"event_version": 1}},
+    {"actor": "ai", "event_type": "action", "summary": "Drafted a response but used the wrong delivery date.", "provenance": "observed", "metadata": {"event_version": 1}},
+    {"actor": "human", "event_type": "correction", "summary": "Supplied the verified delivery date.", "provenance": "observed", "metadata": {"event_version": 1}},
+    {"actor": "ai", "event_type": "recovery", "summary": "Revised the analysis and response using the verified date.", "provenance": "observed", "metadata": {"event_version": 1}}
+  ],
+  "final_result": {"summary": "Revised response draft", "adoption_status": "adopted", "quality_notes": "Employee approved the corrected version."},
+  "evidence": [{"evidence_type": "conversation_excerpt", "source_ref": "current-session:task", "sanitized_excerpt": "The delivery date was corrected before the final reply.", "provenance": "observed"}],
+  "external_references": [],
+  "harness_metadata": {"harness": "generic", "extension": {}}
+}
+

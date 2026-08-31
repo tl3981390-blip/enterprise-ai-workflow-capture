@@ -1,0 +1,8 @@
+This project was designed after reviewing public ideas from Microsoft Skill
+Recorder (MIT) concerning event-oriented records and privacy. No source code,
+screen capture, input monitoring, or background surveillance capability was
+copied or included.
+
+The project also follows the public Agent Skills file conventions. Runtime code
+in this repository is original and uses only the Python standard library.
+
