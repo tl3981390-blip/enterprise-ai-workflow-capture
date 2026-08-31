@@ -1,0 +1,3 @@
+-- Canonical SQL is embedded in workflow_capture/database.py for self-contained runtime execution.
+-- Migration 3 rebuilds confirmations as PREPARED/CONFIRMED/CONSUMED intents and
+-- types evidence as internal, external_reference, or legacy_unverified.

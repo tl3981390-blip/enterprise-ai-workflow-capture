@@ -30,8 +30,15 @@ Required fields:
       "evidence_type": "conversation_excerpt | file_hash | tool_result | user_confirmation",
       "source_ref": "current-session:turn-N",
       "sanitized_excerpt": "optional minimal excerpt",
-      "content_hash": "optional hash when content is not retained",
       "provenance": "observed"
+    },
+    {
+      "evidence_type": "file_hash",
+      "source_ref": "approved-store:document-id",
+      "external_digest": "external digest value",
+      "hash_algorithm": "sha256 | sha512 | blake2b",
+      "verification_state": "verified | unverified",
+      "provenance": "observed | user_reported"
     }
   ],
   "external_references": [
@@ -41,5 +48,4 @@ Required fields:
 }
 ```
 
-`confidence` is meaningful only for `ai_inferred`; it does not turn inference into evidence. Prefer a source hash over an excerpt when the text itself is not necessary to reconstruct the process.
-
+`confidence` is meaningful only for `ai_inferred`; it does not turn inference into evidence. `content_hash` is forbidden input: the runtime computes it from canonical sanitized internal evidence. External-only evidence must use the separate digest, algorithm, source and verification fields; an external digest is never treated as the runtime's content hash.

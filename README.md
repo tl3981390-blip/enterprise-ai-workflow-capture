@@ -23,14 +23,15 @@ Python 3.10+; no runtime packages outside the Python standard library.
 
 ```bash
 python scripts/flow_capture.py doctor
-python scripts/flow_capture.py prepare --input examples/complaint-candidate.json --output confirmation.json
-# Review confirmation.json and explicitly confirm in the current interaction.
-python scripts/flow_capture.py commit --confirmation confirmation.json --token <shown-token> --db workflows.db
+python scripts/flow_capture.py prepare --input examples/complaint-candidate.json --output confirmation.json --db workflows.db
+# Review, then the human runs this in an interactive terminal:
+python scripts/flow_capture.py confirm --confirmation confirmation.json --db workflows.db
+python scripts/flow_capture.py commit --confirmation confirmation.json --db workflows.db
 python scripts/flow_capture.py show --task-id <task-id> --db workflows.db
 python scripts/flow_capture.py similar --task-type customer-complaint-response --db workflows.db
 ```
 
-The confirmation token proves only that the exact prepared artifact is being committed; it does not substitute for the human's explicit confirmation.
+Prepare exposes no commit token. Confirmation is a separate interactive state transition stored in the database and consumed atomically by Commit.
 
 ## Installation
 
@@ -48,7 +49,7 @@ The installer copies a self-contained skill and runs `doctor`. See [docs/INSTALL
 python -m unittest discover -s tests -v
 python scripts/flow_capture.py doctor --db .tmp/acceptance.db
 python <skill-creator>/scripts/quick_validate.py .
-python scripts/build_release.py --version 1.0.0
+python scripts/build_release.py --version 1.0.1
 ```
 
 See [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) for the acceptance matrix and [docs/SECURITY.md](docs/SECURITY.md) for the threat boundaries.
@@ -56,4 +57,3 @@ See [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) for the acceptance matrix and [docs
 ## License
 
 MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-

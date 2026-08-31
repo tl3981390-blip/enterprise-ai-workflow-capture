@@ -4,9 +4,9 @@ import sqlite3
 import sys
 
 from . import SCHEMA_VERSION, __version__
-from .database import connect, migrate
-from .errors import CaptureError
-from .service import commit, load_json, prepare, save_json, show, similar
+from .database import connect, migrate, verify_evidence_chains
+from .errors import CaptureError, ConfirmationError
+from .service import commit, confirm, load_json, prepare, save_json, show, similar
 
 
 def output(value):
@@ -20,9 +20,14 @@ def build_parser():
     p = commands.add_parser("prepare", help="sanitize and prepare a human-confirmable draft")
     p.add_argument("--input", required=True)
     p.add_argument("--output", required=True)
+    p.add_argument("--db", required=True)
+    p = commands.add_parser("confirm", help="interactively confirm the exact prepared payload")
+    p.add_argument("--confirmation", required=True)
+    p.add_argument("--db", required=True)
+    p.add_argument("--identity")
+    p.add_argument("--identity-source")
     p = commands.add_parser("commit", help="persist an explicitly confirmed draft")
     p.add_argument("--confirmation", required=True)
-    p.add_argument("--token", required=True)
     p.add_argument("--db", required=True)
     p = commands.add_parser("show", help="read back one confirmed task")
     p.add_argument("--task-id", required=True)
@@ -40,11 +45,25 @@ def build_parser():
 
 def run(args):
     if args.command == "prepare":
-        artifact = prepare(load_json(args.input))
+        artifact = prepare(load_json(args.input), args.db)
         save_json(args.output, artifact)
-        return {"status": artifact["status"], "output": args.output, **artifact["confirmation_summary"], "redactions": artifact["redactions"], "confirmation_token": artifact["confirmation_token"]}
+        return {"status": artifact["status"], "output": args.output, "confirmation_id": artifact["confirmation_id"], "payload_hash": artifact["payload_hash"], **artifact["confirmation_summary"], "redactions": artifact["redactions"]}
+    if args.command == "confirm":
+        if bool(args.identity) != bool(args.identity_source):
+            raise CaptureError("identity and identity-source must be supplied together")
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            raise ConfirmationError("human confirmation requires an interactive terminal; piped or automated confirmation is refused")
+        artifact = load_json(args.confirmation)
+        challenge = f"CONFIRM {artifact.get('payload_hash', '')[:12]}"
+        print(json.dumps({"status": "HUMAN_CONFIRMATION_REQUIRED", "summary": artifact.get("confirmation_summary"), "payload_hash": artifact.get("payload_hash"), "type_exactly": challenge}, ensure_ascii=False, indent=2))
+        response = input("> ")
+        if response != challenge:
+            raise ConfirmationError("confirmation challenge did not match")
+        confirmed = confirm(artifact, args.db, method="interactive_tty", identity=args.identity, source=args.identity_source)
+        save_json(args.confirmation, confirmed)
+        return {"status": confirmed["status"], "confirmation_id": confirmed["confirmation_id"], "confirmed_at": confirmed["confirmed_at"], "confirmation_method": confirmed["confirmation_method"], "confirmation_identity": confirmed["confirmation_identity"], "confirmation_source": confirmed["confirmation_source"]}
     if args.command == "commit":
-        return commit(load_json(args.confirmation), args.token, args.db)
+        return commit(load_json(args.confirmation), args.db)
     if args.command == "show":
         result = show(args.db, args.task_id)
         if result is None:
@@ -68,6 +87,9 @@ def run(args):
                 result["database_schema_version"] = migrate(connection)
                 result["foreign_keys"] = bool(connection.execute("PRAGMA foreign_keys").fetchone()[0])
                 result["integrity_check"] = connection.execute("PRAGMA integrity_check").fetchone()[0]
+                result["evidence_chain"] = verify_evidence_chains(connection)
+                if result["evidence_chain"]["status"] != "ok":
+                    result["status"] = "error"
             finally:
                 connection.close()
         return result
@@ -77,8 +99,9 @@ def run(args):
 def main(argv=None):
     try:
         args = build_parser().parse_args(argv)
-        output(run(args))
-        return 0
+        result = run(args)
+        output(result)
+        return 1 if result.get("status") == "error" else 0
     except (CaptureError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
@@ -89,4 +112,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

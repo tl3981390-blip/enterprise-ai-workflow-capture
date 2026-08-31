@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "enterprise-ai-workflow-capture"
-version = "1.0.0"
+version = "1.0.1"
 description = "Privacy-first capture of confirmed human-AI work processes"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -16,4 +16,3 @@ flow-capture = "workflow_capture.cli:main"
 
 [tool.setuptools]
 packages = ["workflow_capture"]
-

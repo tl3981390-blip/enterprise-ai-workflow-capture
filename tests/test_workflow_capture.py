@@ -1,13 +1,15 @@
 import copy
 import json
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from workflow_capture.database import MIGRATIONS, connect, current_version, migrate
+from workflow_capture.database import MIGRATIONS, connect, current_version, migrate, verify_evidence_chains
 from workflow_capture.errors import ConfirmationError, MigrationError, ValidationError
-from workflow_capture.service import commit, prepare, show, similar
+from workflow_capture.service import commit, confirm, prepare, show, similar
 from workflow_capture.util import digest
 
 
@@ -37,16 +39,26 @@ class CaptureAcceptanceTests(unittest.TestCase):
         self.temp.cleanup()
 
     def confirmed_commit(self, value):
-        artifact = prepare(value)
-        result = commit(artifact, artifact["confirmation_token"], self.db)
-        return artifact, result
+        prepared = prepare(value, self.db)
+        confirmed = confirm(prepared, self.db, method="test_explicit_human", identity="employee-test", source="test-harness")
+        result = commit(confirmed, self.db)
+        return confirmed, result
 
     def test_01_one_shot_success_and_read_back(self):
         artifact, result = self.confirmed_commit(candidate())
         self.assertTrue(result["read_back_ok"])
         stored = show(self.db, result["task_id"])
         self.assertEqual(stored["payload"], artifact["payload"])
-        self.assertEqual(stored["confirmed_payload_hash"], artifact["confirmed_payload_hash"])
+        self.assertEqual(stored["confirmed_payload_hash"], artifact["payload_hash"])
+        connection = connect(self.db)
+        try:
+            row = connection.execute("SELECT * FROM confirmations WHERE confirmation_id=?", (artifact["confirmation_id"],)).fetchone()
+            self.assertEqual((row["status"], row["confirmation_method"], row["confirmation_identity"], row["confirmation_source"]), ("CONSUMED", "test_explicit_human", "employee-test", "test-harness"))
+            self.assertEqual(row["payload_hash"], artifact["payload_hash"])
+            self.assertIsNotNone(row["confirmed_at"])
+            self.assertIsNotNone(row["consumed_at"])
+        finally:
+            connection.close()
 
     def test_02_multi_turn_clarification_is_preserved(self):
         steps = candidate()["steps"]
@@ -78,7 +90,7 @@ class CaptureAcceptanceTests(unittest.TestCase):
         synthetic_key = "sk-" + "TESTONLY1234567890abcdef"
         credential_label = "api_" + "key="
         value["steps"][0]["summary"] = f"{credential_label}{synthetic_key} email user@example.com phone 13800138000"
-        artifact = prepare(value)
+        artifact = prepare(value, self.db)
         text = json.dumps(artifact["payload"])
         self.assertNotIn(synthetic_key, text)
         self.assertNotIn("user@example.com", text)
@@ -93,12 +105,13 @@ class CaptureAcceptanceTests(unittest.TestCase):
         self.assertEqual(len(matches), 2)
 
     def test_08_human_edit_requires_fresh_prepare(self):
-        artifact = prepare(candidate())
+        artifact = prepare(candidate(), self.db)
         artifact["payload"]["task_goal"] = "Corrected goal"
         with self.assertRaises(ConfirmationError):
-            commit(artifact, artifact["confirmation_token"], self.db)
-        refreshed = prepare(artifact["payload"])
-        result = commit(refreshed, refreshed["confirmation_token"], self.db)
+            confirm(artifact, self.db, method="test_explicit_human")
+        refreshed = prepare(artifact["payload"], self.db)
+        confirmed = confirm(refreshed, self.db, method="test_explicit_human")
+        result = commit(confirmed, self.db)
         self.assertEqual(show(self.db, result["task_id"])["payload"]["task_goal"], "Corrected goal")
 
     def test_09_same_task_type_different_paths_remain_distinct(self):
@@ -125,18 +138,39 @@ class CaptureAcceptanceTests(unittest.TestCase):
         self.assertEqual(lineage_count, 1)
         self.assertIsNotNone(knowledge_table)
 
-    def test_11_schema_v1_migrates_to_v2_and_old_data_reads(self):
-        artifact = prepare(candidate())
+    def test_11_schema_v2_migrates_to_v3_and_old_data_reads(self):
         connection = connect(self.db)
         connection.executescript(MIGRATIONS[1])
         connection.execute("INSERT INTO schema_migrations VALUES (1, '2026-01-01T00:00:00Z', ?)", (digest(MIGRATIONS[1].encode()),))
+        connection.executescript(MIGRATIONS[2])
+        connection.execute("INSERT INTO schema_migrations VALUES (2, '2026-01-01T00:00:01Z', ?)", (digest(MIGRATIONS[2].encode()),))
+        old_payload = candidate()
+        old_hash = digest(old_payload)
+        connection.execute(
+            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("task_legacy", 2, old_payload["task_type"], old_payload["task_type"], old_payload["task_goal"], "adopted", json.dumps(old_payload["final_result"]), json.dumps(old_payload), old_hash, "legacy", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "{}"),
+        )
+        connection.execute("INSERT INTO confirmations VALUES (?,?,?,?,?,?)", ("confirm_legacy", "task_legacy", "legacy-token-hash", old_hash, "2026-01-01T00:00:00Z", "legacy_explicit"))
         connection.commit()
         connection.close()
-        result = commit(artifact, artifact["confirmation_token"], self.db)
-        self.assertEqual(show(self.db, result["task_id"])["schema_version"], 2)
+        connection = connect(self.db)
+        migrate(connection)
+        connection.close()
+        self.assertEqual(show(self.db, "task_legacy")["payload"]["task_goal"], old_payload["task_goal"])
         connection = connect(self.db)
         try:
-            self.assertEqual(current_version(connection), 2)
+            legacy = connection.execute("SELECT status, confirmation_source, consumed_at FROM confirmations WHERE confirmation_id='confirm_legacy'").fetchone()
+            self.assertEqual((legacy["status"], legacy["confirmation_source"]), ("CONSUMED", "legacy_v2"))
+            self.assertIsNotNone(legacy["consumed_at"])
+        finally:
+            connection.close()
+        artifact = prepare(candidate("new-after-migration"), self.db)
+        confirmed = confirm(artifact, self.db, method="test_explicit_human")
+        result = commit(confirmed, self.db)
+        self.assertEqual(show(self.db, result["task_id"])["schema_version"], 3)
+        connection = connect(self.db)
+        try:
+            self.assertEqual(current_version(connection), 3)
         finally:
             connection.close()
 
@@ -151,35 +185,106 @@ class BoundaryAndFailureTests(unittest.TestCase):
 
     def test_invalid_and_empty_input(self):
         with self.assertRaises(ValidationError):
-            prepare({})
+            prepare({}, self.db)
         value = candidate()
         value["steps"] = []
         with self.assertRaises(ValidationError):
-            prepare(value)
+            prepare(value, self.db)
 
-    def test_wrong_token_and_new_secret_are_blocked(self):
-        artifact = prepare(candidate())
+    def test_unconfirmed_and_new_secret_are_blocked(self):
+        artifact = prepare(candidate(), self.db)
         with self.assertRaises(ConfirmationError):
-            commit(artifact, "wrong", self.db)
+            commit(artifact, self.db)
+        connection = connect(self.db)
+        try:
+            self.assertIsNone(connection.execute("SELECT task_id FROM tasks").fetchone())
+        finally:
+            connection.close()
         artifact["payload"]["steps"][0]["summary"] = "password=" + "TEST_ONLY_SECRET"
-        artifact["confirmed_payload_hash"] = digest(artifact["payload"])
+        artifact["payload_hash"] = digest(artifact["payload"])
         with self.assertRaises(ConfirmationError):
-            commit(artifact, artifact["confirmation_token"], self.db)
+            confirm(artifact, self.db, method="test_explicit_human")
 
-    def test_duplicate_commit_is_idempotent(self):
-        artifact = prepare(candidate())
-        first = commit(artifact, artifact["confirmation_token"], self.db)
-        second = commit(artifact, artifact["confirmation_token"], self.db)
-        self.assertEqual(first["task_id"], second["task_id"])
-        self.assertTrue(second["idempotent_hit"])
+    def test_confirmation_cannot_be_consumed_twice(self):
+        artifact = prepare(candidate(), self.db)
+        confirmed = confirm(artifact, self.db, method="test_explicit_human")
+        first = commit(confirmed, self.db)
+        with self.assertRaises(ConfirmationError):
+            commit(confirmed, self.db)
+        connection = connect(self.db)
+        try:
+            row = connection.execute("SELECT status, task_id, consumed_at FROM confirmations WHERE confirmation_id=?", (confirmed["confirmation_id"],)).fetchone()
+            self.assertEqual((row["status"], row["task_id"]), ("CONSUMED", first["task_id"]))
+            self.assertIsNotNone(row["consumed_at"])
+        finally:
+            connection.close()
 
     def test_persistence_survives_reconnect_and_integrity_is_ok(self):
-        artifact = prepare(candidate())
-        result = commit(artifact, artifact["confirmation_token"], self.db)
+        artifact = prepare(candidate(), self.db)
+        confirmed = confirm(artifact, self.db, method="test_explicit_human")
+        result = commit(confirmed, self.db)
         self.assertIsNotNone(show(self.db, result["task_id"]))
         connection = connect(self.db)
         try:
             self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        finally:
+            connection.close()
+
+    def test_forged_internal_content_hash_is_rejected(self):
+        value = candidate()
+        value["evidence"][0]["content_hash"] = "b" * 64
+        with self.assertRaises(ValidationError):
+            prepare(value, self.db)
+        self.assertFalse(self.db.exists())
+
+    def test_external_digest_is_typed_and_not_used_as_content_hash(self):
+        value = candidate()
+        external_digest = "a" * 64
+        value["evidence"] = [{
+            "evidence_type": "file_hash", "source_ref": "approved-store:document-7",
+            "external_digest": external_digest, "hash_algorithm": "sha256",
+            "verification_state": "unverified", "provenance": "user_reported",
+        }]
+        prepared = prepare(value, self.db)
+        confirmed = confirm(prepared, self.db, method="test_explicit_human")
+        result = commit(confirmed, self.db)
+        connection = connect(self.db)
+        try:
+            row = connection.execute("SELECT * FROM evidence WHERE task_id=?", (result["task_id"],)).fetchone()
+            self.assertEqual((row["evidence_kind"], row["external_digest"], row["verification_state"]), ("external_reference", external_digest, "unverified"))
+            self.assertNotEqual(row["content_hash"], external_digest)
+            self.assertEqual(verify_evidence_chains(connection)["status"], "ok")
+        finally:
+            connection.close()
+
+    def test_evidence_content_tamper_breaks_chain_verification(self):
+        prepared = prepare(candidate(), self.db)
+        confirmed = confirm(prepared, self.db, method="test_explicit_human")
+        result = commit(confirmed, self.db)
+        connection = connect(self.db)
+        try:
+            connection.execute("UPDATE evidence SET sanitized_excerpt='tampered' WHERE task_id=?", (result["task_id"],))
+            connection.commit()
+            verification = verify_evidence_chains(connection)
+            self.assertEqual(verification["status"], "failed")
+            self.assertEqual(len(verification["failed_event_ids"]), 1)
+        finally:
+            connection.close()
+
+    def test_cli_confirmation_refuses_noninteractive_input(self):
+        artifact = prepare(candidate(), self.db)
+        artifact_path = Path(self.temp.name) / "confirmation.json"
+        artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, "scripts/flow_capture.py", "confirm", "--confirmation", str(artifact_path), "--db", str(self.db)],
+            input=f"CONFIRM {artifact['payload_hash'][:12]}\n", text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("interactive terminal", result.stderr)
+        connection = connect(self.db)
+        try:
+            state = connection.execute("SELECT status FROM confirmations WHERE confirmation_id=?", (artifact["confirmation_id"],)).fetchone()["status"]
+            self.assertEqual(state, "PREPARED")
         finally:
             connection.close()
 

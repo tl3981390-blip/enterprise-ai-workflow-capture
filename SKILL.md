@@ -3,7 +3,7 @@ name: enterprise-ai-workflow-capture
 description: Capture a completed human-AI work process from the current legally provided conversation, sanitize it, obtain human confirmation, persist it with lineage, and query how work was actually completed. Use when a user explicitly asks to record, capture, or deposit the current task workflow; do not use for passive monitoring, chat archiving, or AI usage counting.
 license: MIT
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   language: "en,zh-CN"
 ---
 
@@ -15,7 +15,7 @@ Capture **how a real task was completed**, not a transcript and not an employee 
 
 - Run only after an explicit user request such as “记录这次流程” or “沉淀这次任务”.
 - Use only the current conversation context legally supplied by the harness and facts the user supplies. Never inspect other conversations, applications, devices, business systems, or employee data.
-- Never persist a draft without an explicit confirmation in the current interaction. Preparing a draft is reversible; committing it is a separate action.
+- Never persist a draft without a consumed database-backed confirmation. `PREPARED`, `CONFIRMED`, and `CONSUMED` are distinct mechanical states.
 - Sanitize before persistence. Never persist passwords, tokens, API keys, private keys, personal identifiers, payment-card data, private contact details, unauthorized source text, or unnecessary confidential content.
 - Preserve uncertainty and provenance. AI inference is not observation. A human correction supersedes a draft but does not rewrite historical evidence.
 - Do not calculate employee performance, rank people, or claim a `BEST_KNOWN_PATH` from insufficient evidence.
@@ -27,17 +27,23 @@ Capture **how a real task was completed**, not a transcript and not an employee 
 3. Write the candidate JSON to a user-approved workspace location and run:
 
    ```bash
-   python scripts/flow_capture.py prepare --input <candidate.json> --output <confirmation.json>
+   python scripts/flow_capture.py prepare --input <candidate.json> --output <confirmation.json> --db <workflow.db>
    ```
 
 4. Show the compact confirmation summary. Call out redactions, uncertain/inferred fields, retained evidence, final adoption state, and anything intentionally excluded. Let the user edit or delete fields.
-5. Only after the user explicitly confirms, run the commit with the exact token from the prepared artifact:
+5. Ask the user to run the interactive confirmation command in a real terminal. Do not run it for the user, pipe input, or automate its challenge. The command writes the `CONFIRMED` transition; no confirmation token is exposed by Prepare:
 
    ```bash
-   python scripts/flow_capture.py commit --confirmation <confirmation.json> --token <token> --db <workflow.db>
+   python scripts/flow_capture.py confirm --confirmation <confirmation.json> --db <workflow.db>
    ```
 
-6. Read back the committed record and compare its `confirmed_payload_hash` with the prepared artifact. Report the stable `task_id`, persisted status, redaction count, and database path.
+6. After the artifact and database both report `CONFIRMED`, commit it:
+
+   ```bash
+   python scripts/flow_capture.py commit --confirmation <confirmation.json> --db <workflow.db>
+   ```
+
+7. Read back the committed record and compare its payload hash with the prepared artifact. Confirm that the confirmation is `CONSUMED`, linked to the stable `task_id`, and cannot be consumed again.
 
 If preparation reports `confirmation_required`, ask only for facts that materially affect process fidelity or privacy. Unknown is valid; never invent missing steps. If the user declines confirmation, do not commit.
 
@@ -57,5 +63,4 @@ If preparation reports `confirmation_required`, ask only for facts that material
 
 ## Completion evidence
 
-A capture is complete only when the user confirmed the sanitized candidate, commit returned success, read-back hash matched, and a subsequent `show` returns the same confirmed content. A model statement or draft file is not persistence evidence.
-
+A capture is complete only when the database proves `PREPARED → CONFIRMED → CONSUMED`, commit returned `PERSISTED`, read-back hash matched, and a subsequent `show` returns the same content. A model statement, prepared artifact, or unconsumed confirmation is not persistence evidence.
