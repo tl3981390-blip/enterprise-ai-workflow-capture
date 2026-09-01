@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-EXCLUDE = {".git", ".pytest_cache", "__pycache__", "evidence", "dist"}
+EXCLUDE = {".git", ".pytest_cache", "__pycache__", "evidence", "dist", ".mimosa"}
 
 
 def main():

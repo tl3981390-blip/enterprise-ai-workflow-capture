@@ -1,12 +1,14 @@
 import argparse
 import json
+import os
 import sqlite3
 import sys
 
 from . import SCHEMA_VERSION, __version__
-from .database import connect, migrate, verify_evidence_chains
-from .errors import CaptureError, ConfirmationError
-from .service import commit, confirm, load_json, prepare, save_json, show, similar
+from .authorization import ENV_GRANT_FILE, load_grant
+from .errors import AuthorizationError, CaptureError, CaptureStorageError, ConfirmationError
+from .service import capture, commit, confirm, load_json, prepare, save_json, show, similar
+from .storage import resolve_adapter
 
 
 def output(value):
@@ -14,14 +16,17 @@ def output(value):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(prog="flow-capture", description="Capture confirmed human-AI work processes")
+    parser = argparse.ArgumentParser(prog="flow-capture", description="Capture human-AI work processes under explicit or enterprise-managed authorization")
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
-    p = commands.add_parser("prepare", help="sanitize and prepare a human-confirmable draft")
+    p = commands.add_parser("capture", help="enterprise-managed one-shot capture; requires harness-provided authorization and fails closed without it")
+    p.add_argument("--input", required=True)
+    p.add_argument("--db", help="local SQLite target; omit when the environment selects an enterprise storage adapter")
+    p = commands.add_parser("prepare", help="sanitize and prepare a human-confirmable draft (personal explicit capture)")
     p.add_argument("--input", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--db", required=True)
-    p = commands.add_parser("confirm", help="interactively confirm the exact prepared payload")
+    p = commands.add_parser("confirm", help="interactively confirm the exact prepared payload (personal explicit capture)")
     p.add_argument("--confirmation", required=True)
     p.add_argument("--db", required=True)
     p.add_argument("--identity")
@@ -29,7 +34,7 @@ def build_parser():
     p = commands.add_parser("commit", help="persist an explicitly confirmed draft")
     p.add_argument("--confirmation", required=True)
     p.add_argument("--db", required=True)
-    p = commands.add_parser("show", help="read back one confirmed task")
+    p = commands.add_parser("show", help="read back one persisted task")
     p.add_argument("--task-id", required=True)
     p.add_argument("--db", required=True)
     p = commands.add_parser("similar", help="find recent tasks with the same normalized task type")
@@ -38,12 +43,14 @@ def build_parser():
     p.add_argument("--db", required=True)
     p = commands.add_parser("migrate", help="migrate a database to the supported schema")
     p.add_argument("--db", required=True)
-    p = commands.add_parser("doctor", help="verify runtime and optional database health")
+    p = commands.add_parser("doctor", help="verify runtime, storage and authorization configuration health")
     p.add_argument("--db")
     return parser
 
 
 def run(args):
+    if args.command == "capture":
+        return capture(load_json(args.input), args.db)
     if args.command == "prepare":
         artifact = prepare(load_json(args.input), args.db)
         save_json(args.output, artifact)
@@ -74,24 +81,33 @@ def run(args):
             raise CaptureError("limit must be between 1 and 100")
         return {"task_type": args.task_type, "match_basis": "normalized_task_type", "results": similar(args.db, args.task_type, args.limit)}
     if args.command == "migrate":
-        connection = connect(args.db)
-        try:
-            return {"status": "migrated", "schema_version": migrate(connection), "database": args.db}
-        finally:
-            connection.close()
+        adapter = resolve_adapter(args.db)
+        return {"status": "migrated", "schema_version": adapter.ensure_schema(), "database": args.db}
     if args.command == "doctor":
         result = {"status": "ok", "package_version": __version__, "supported_schema_version": SCHEMA_VERSION, "sqlite_version": sqlite3.sqlite_version}
-        if args.db:
-            connection = connect(args.db)
-            try:
-                result["database_schema_version"] = migrate(connection)
-                result["foreign_keys"] = bool(connection.execute("PRAGMA foreign_keys").fetchone()[0])
-                result["integrity_check"] = connection.execute("PRAGMA integrity_check").fetchone()[0]
-                result["evidence_chain"] = verify_evidence_chains(connection)
-                if result["evidence_chain"]["status"] != "ok":
+        try:
+            adapter = resolve_adapter(args.db)
+            result["storage"] = {"kind": adapter.kind}
+            if args.db:
+                health = adapter.health()
+                result["database_schema_version"] = health["schema_version"]
+                result["foreign_keys"] = health["foreign_keys"]
+                result["integrity_check"] = health["integrity_check"]
+                chain = adapter.verify_evidence_chains()
+                result["evidence_chain"] = chain
+                if chain["status"] != "ok":
                     result["status"] = "error"
-            finally:
-                connection.close()
+        except CaptureError as exc:
+            result["storage"] = {"configured": False, "error": str(exc)}
+            result["status"] = "error"
+        result["authorization"] = {"configured": bool(os.environ.get(ENV_GRANT_FILE, "").strip())}
+        if result["authorization"]["configured"]:
+            try:
+                grant = load_grant()
+                result["authorization"].update({"mode": grant.mode, "issuer": grant.issuer, "verification": grant.verification, "expires_at": grant.data["expires_at"]})
+            except AuthorizationError as exc:
+                result["authorization"]["error"] = str(exc)
+                result["status"] = "error"
         return result
     raise CaptureError("unknown command")
 
@@ -102,6 +118,12 @@ def main(argv=None):
         result = run(args)
         output(result)
         return 1 if result.get("status") == "error" else 0
+    except AuthorizationError as exc:
+        print(json.dumps({"status": "CAPTURE_REFUSED_UNAUTHORIZED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return 4
+    except CaptureStorageError as exc:
+        print(json.dumps({"status": exc.status, "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        return 5
     except (CaptureError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2

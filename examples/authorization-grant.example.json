@@ -1,0 +1,14 @@
+{
+  "_comment": "Template only. The enterprise/harness issues grants at deployment; scripts/make_grant.py can mint one for local testing using WORKFLOW_CAPTURE_AUTHORIZATION_KEY. This file is not a valid grant.",
+  "grant_version": 1,
+  "grant_id": "grant_REPLACE_ME",
+  "issuer": "REPLACE_ME harness/enterprise identifier",
+  "mode": "ENTERPRISE_MANAGED_CAPTURE",
+  "capture_authorized": true,
+  "capture_scope": {"task_types": ["supplier-quote-comparison"], "departments": ["procurement"]},
+  "storage_scope": {"adapter": "local_sqlite"},
+  "retention_policy": "REPLACE_ME enterprise retention policy reference",
+  "issued_at": "2026-09-01T00:00:00Z",
+  "expires_at": "2026-12-01T00:00:00Z",
+  "signature": "optional hex HMAC-SHA256 over this object without the signature field"
+}

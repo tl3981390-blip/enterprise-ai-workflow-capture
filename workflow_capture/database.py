@@ -3,8 +3,8 @@ import sqlite3
 from pathlib import Path
 
 from . import SCHEMA_VERSION
-from .errors import ConfirmationError, MigrationError
-from .util import canonical_json, digest, new_id, normalize_label, utc_now
+from .errors import CaptureError, ConfirmationError, MigrationError
+from .util import canonical_json, digest, new_id, normalize_label, payload_digest, utc_now
 
 
 MIGRATIONS = {
@@ -68,6 +68,23 @@ ALTER TABLE evidence ADD COLUMN hash_algorithm TEXT NOT NULL DEFAULT 'sha256';
 ALTER TABLE evidence ADD COLUMN external_digest TEXT;
 ALTER TABLE evidence ADD COLUMN verification_state TEXT NOT NULL DEFAULT 'legacy_unverified';
 """,
+    4: """
+ALTER TABLE tasks ADD COLUMN capture_session_id TEXT;
+ALTER TABLE tasks ADD COLUMN capture_mode TEXT NOT NULL DEFAULT 'PERSONAL_EXPLICIT_CAPTURE';
+ALTER TABLE tasks ADD COLUMN capture_status TEXT NOT NULL DEFAULT 'TASK_COMPLETED_CAPTURE_PERSISTED';
+ALTER TABLE tasks ADD COLUMN started_at TEXT;
+ALTER TABLE tasks ADD COLUMN completed_at TEXT;
+ALTER TABLE tasks ADD COLUMN business_context_ref_hash TEXT;
+ALTER TABLE tasks ADD COLUMN business_context_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE tasks ADD COLUMN ai_context_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE tasks ADD COLUMN authorization_json TEXT NOT NULL DEFAULT '{}';
+CREATE UNIQUE INDEX idx_tasks_capture_session ON tasks(capture_session_id) WHERE capture_session_id IS NOT NULL;
+ALTER TABLE steps ADD COLUMN occurred_at TEXT;
+ALTER TABLE steps ADD COLUMN duration_ms INTEGER;
+ALTER TABLE steps ADD COLUMN capability_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE steps ADD COLUMN intervention_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE derived_knowledge ADD COLUMN sample_size INTEGER;
+""",
 }
 
 
@@ -113,7 +130,7 @@ def migrate(connection, target=SCHEMA_VERSION):
 def create_confirmation(connection, payload):
     migrate(connection)
     confirmation_id = new_id("confirm")
-    payload_hash = digest(payload)
+    payload_hash = payload_digest(payload)
     prepared_at = utc_now()
     connection.execute(
         "INSERT INTO confirmations(confirmation_id,payload_json,payload_hash,prepared_at,status) VALUES (?,?,?,?, 'PREPARED')",
@@ -170,23 +187,60 @@ def _canonical_evidence(item):
     return "external_reference", item["hash_algorithm"], item["external_digest"].lower(), item["verification_state"], digest(content)
 
 
-def _insert_task(connection, payload, payload_hash, confirmed_at):
+def _insert_task(connection, payload, payload_hash, committed_at, capture_mode, authorization_record):
+    session_id = payload.get("capture_session_id")
+    if session_id:
+        existing = connection.execute(
+            "SELECT task_id, confirmed_payload_hash FROM tasks WHERE capture_session_id=?", (session_id,)
+        ).fetchone()
+        if existing:
+            if existing["confirmed_payload_hash"] != payload_hash:
+                raise CaptureError(
+                    "capture_session_id was already persisted with a different payload; refusing to overwrite history"
+                )
+            return existing["task_id"], True
     existing = connection.execute("SELECT task_id FROM tasks WHERE confirmed_payload_hash=?", (payload_hash,)).fetchone()
     if existing:
         return existing["task_id"], True
     now = utc_now()
     task_id, process_id, path_id = new_id("task"), new_id("process"), new_id("path")
     signature = _path_signature(payload["steps"])
+    business_context = payload.get("business_context") or {}
+    context_ref = business_context.get("ref")
     connection.execute(
-        "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (task_id, SCHEMA_VERSION, payload["task_type"], normalize_label(payload["task_type"]), payload["task_goal"],
-         payload["final_result"]["adoption_status"], canonical_json(payload["final_result"]), canonical_json(payload),
-         payload_hash, signature, now, confirmed_at, canonical_json(payload.get("harness_metadata", {}))),
+        """INSERT INTO tasks(
+             task_id, schema_version, task_type, task_type_normalized, task_goal, adoption_status,
+             final_result_json, confirmed_payload_json, confirmed_payload_hash, path_signature,
+             created_at, confirmed_at, harness_metadata_json,
+             capture_session_id, capture_mode, capture_status, started_at, completed_at,
+             business_context_ref_hash, business_context_json, ai_context_json, authorization_json
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            task_id, SCHEMA_VERSION, payload["task_type"], normalize_label(payload["task_type"]), payload["task_goal"],
+            payload["final_result"]["adoption_status"], canonical_json(payload["final_result"]), canonical_json(payload),
+            payload_hash, signature, now, committed_at, canonical_json(payload.get("harness_metadata", {})),
+            session_id, capture_mode, "TASK_COMPLETED_CAPTURE_PERSISTED",
+            payload.get("started_at"), payload.get("completed_at"),
+            digest(str(context_ref)) if context_ref else None,
+            canonical_json(business_context), canonical_json(payload.get("ai_context") or {}),
+            canonical_json(authorization_record or {}),
+        ),
     )
     connection.execute("INSERT INTO processes VALUES (?,?,?,?)", (process_id, task_id, payload.get("process_summary"), canonical_json(payload.get("prerequisites", []))))
     connection.execute("INSERT INTO paths VALUES (?,?,?,?)", (path_id, process_id, signature, payload["final_result"]["adoption_status"]))
     for index, step in enumerate(payload["steps"], 1):
-        connection.execute("INSERT INTO steps VALUES (?,?,?,?,?,?,?,?,?)", (new_id("step"), path_id, index, step["actor"], step["event_type"], step["summary"], step["provenance"], step.get("confidence"), canonical_json(step.get("metadata", {}))))
+        connection.execute(
+            """INSERT INTO steps(
+                 step_id, path_id, ordinal, actor, event_type, summary, provenance, confidence,
+                 metadata_json, occurred_at, duration_ms, capability_json, intervention_json
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                new_id("step"), path_id, index, step["actor"], step["event_type"], step["summary"],
+                step["provenance"], step.get("confidence"), canonical_json(step.get("metadata", {})),
+                step.get("occurred_at"), step.get("duration_ms"),
+                canonical_json(step.get("capability") or {}), canonical_json(step.get("intervention") or {}),
+            ),
+        )
     previous_hash = None
     for index, item in enumerate(payload.get("evidence", []), 1):
         kind, algorithm, external_digest, verification_state, content_hash = _canonical_evidence(item)
@@ -223,7 +277,10 @@ def persist_confirmed(connection, confirmation_id, expected_payload_hash):
         if not row:
             raise ConfirmationError("confirmation has not occurred, changed, or was already consumed")
         payload = json.loads(row["payload_json"])
-        task_id, duplicate = _insert_task(connection, payload, row["payload_hash"], row["confirmed_at"])
+        task_id, duplicate = _insert_task(
+            connection, payload, row["payload_hash"], row["confirmed_at"],
+            capture_mode="PERSONAL_EXPLICIT_CAPTURE", authorization_record=None,
+        )
         consumed_at = utc_now()
         cursor = connection.execute(
             "UPDATE confirmations SET status='CONSUMED', consumed_at=?, task_id=? WHERE confirmation_id=? AND status='CONFIRMED' AND consumed_at IS NULL",
@@ -238,11 +295,48 @@ def persist_confirmed(connection, confirmation_id, expected_payload_hash):
         raise
 
 
+def persist_authorized(connection, payload, authorization_record):
+    """Persist an enterprise-managed capture in one transaction. Idempotent on
+    capture_session_id and on payload hash; a conflicting session id is refused."""
+    migrate(connection)
+    payload_hash = payload_digest(payload)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        task_id, duplicate = _insert_task(
+            connection, payload, payload_hash, utc_now(),
+            capture_mode="ENTERPRISE_MANAGED_CAPTURE", authorization_record=authorization_record,
+        )
+        connection.commit()
+        return {"task_id": task_id, "duplicate": duplicate, "payload_hash": payload_hash}
+    except Exception:
+        connection.rollback()
+        raise
+
+
 def read_task(connection, task_id):
-    row = connection.execute("SELECT confirmed_payload_json, confirmed_payload_hash, schema_version, created_at FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+    row = connection.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
     if not row:
         return None
-    return {"task_id": task_id, "schema_version": row["schema_version"], "created_at": row["created_at"], "confirmed_payload_hash": row["confirmed_payload_hash"], "payload": json.loads(row["confirmed_payload_json"])}
+    result = {
+        "task_id": task_id,
+        "schema_version": row["schema_version"],
+        "created_at": row["created_at"],
+        "confirmed_payload_hash": row["confirmed_payload_hash"],
+        "payload": json.loads(row["confirmed_payload_json"]),
+    }
+    if "capture_mode" in row.keys():
+        result["capture"] = {
+            "capture_session_id": row["capture_session_id"],
+            "capture_mode": row["capture_mode"],
+            "capture_status": row["capture_status"],
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "business_context_ref_hash": row["business_context_ref_hash"],
+            "business_context": json.loads(row["business_context_json"]),
+            "ai_context": json.loads(row["ai_context_json"]),
+            "authorization": json.loads(row["authorization_json"]),
+        }
+    return result
 
 
 def similar_tasks(connection, task_type, limit=10):

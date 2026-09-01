@@ -1,0 +1,8 @@
+-- Canonical SQL is embedded in workflow_capture/database.py for self-contained runtime execution.
+-- Migration 4 (schema v4): tasks gain capture_session_id (unique, nullable),
+-- capture_mode, capture_status, task timing, business context (ref hashed),
+-- AI context and authorization records; steps gain occurred_at, duration_ms,
+-- capability and human-intervention structure; derived_knowledge gains
+-- sample_size. Legacy rows are honestly classified PERSONAL_EXPLICIT_CAPTURE /
+-- TASK_COMPLETED_CAPTURE_PERSISTED because every pre-v4 record was explicitly
+-- confirmed and persisted.

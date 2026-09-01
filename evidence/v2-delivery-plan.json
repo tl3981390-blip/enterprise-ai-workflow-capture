@@ -1,0 +1,20 @@
+{
+  "plan_id": "eawc-v2-delivery-plan",
+  "contract_ref": "evidence/v2-task-understanding-contract.json",
+  "phases": ["GAP_REPORT(done)", "PHASE1_CONSTRUCTION", "PHASE2_ADVERSARIAL", "PHASE3_FINAL", "RELEASE_v2.0.0"],
+  "actions": [
+    {"name": "A01-authorization-module", "description": "新建 workflow_capture/authorization.py：企业采集授权 grant 读取（env 指定路径）、HMAC 验签（密钥仅环境变量）、scope/过期检查、Fail Closed（未获授权一律拒绝）", "target": "workflow_capture/authorization.py", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A02-storage-adapter-contract", "description": "新建 workflow_capture/storage/：Storage Adapter 抽象契约 + SQLite 适配器实现 + env 加载企业适配器入口", "target": "workflow_capture/storage/", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A03-schema-v4-migration", "description": "database.py 新增迁移 4：capture_session_id 幂等、capture 模式/状态、任务与事件时间、工具身份、人工干预、业务上下文、derived sample_size；旧数据诚实映射", "target": "workflow_capture/database.py + migrations/004_capture_sessions.sql", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A04-validation-v2", "description": "validation.py 扩展：decision 事件、可选字段校验、员工评分字段机械拒绝、evidence 摘要长度上限、provenance 规则", "target": "workflow_capture/validation.py", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A05-redaction-hardening", "description": "redaction.py 增加 JWT/AWS/GitHub token 形态；机制不变", "target": "workflow_capture/redaction.py", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A06-service-capture", "description": "service.py 经适配器重构并新增 capture() 企业一次性采集：授权强制、幂等、read-back、失败状态诚实", "target": "workflow_capture/service.py", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A07-cli-v2", "description": "cli.py 新增 capture 命令与授权/存储失败专用退出码；个人 prepare/confirm/commit 保持不变", "target": "workflow_capture/cli.py", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A08-docs-references", "description": "修改 README/SKILL/references/docs/examples：双模式产品定位、capture-contract v2、data-model v4、storage-adapter-contract、enterprise-authorization、隐私与安全边界", "target": "README.md SKILL.md references/ docs/ examples/", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A09-version-metadata", "description": "修改版本元数据为 2.0.0（pyproject/__init__/agents/CHANGELOG/RELEASE_NOTES）", "target": "pyproject.toml workflow_capture/__init__.py agents/openai.yaml CHANGELOG.md docs/RELEASE_NOTES_v2.0.0.md", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A10-v2-tests", "description": "tests/ 新增 v2 测试：授权 Fail Closed/伪造/过期/越域、企业一次性采集、幂等重试、存储失败状态分离、适配器契约套件；v1 二十项测试原样保留", "target": "tests/", "phase": "PHASE1_CONSTRUCTION"},
+    {"name": "A11-adversarial", "description": "执行 18 类对抗场景并落证据 evidence/v2.0.0-adversarial.md", "target": "tests/ + evidence/", "phase": "PHASE2_ADVERSARIAL"},
+    {"name": "A12-final-regression", "description": "全量回归 + 干净安装 + Fresh 环境模拟 + 终验结论 evidence/v2.0.0-acceptance.md", "target": "tests/ + evidence/", "phase": "PHASE3_FINAL"},
+    {"name": "A13-release", "description": "构建确定性 ZIP + SHA256SUMS；git commit/tag v2.0.0；推送并在 GitHub 新建 v2.0.0 Release 上传资产；只读核验 v1.0.1 完好", "target": "dist/ + git tag v2.0.0 + GitHub Release", "phase": "RELEASE_v2.0.0"}
+  ]
+}

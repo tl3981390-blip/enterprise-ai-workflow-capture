@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 
-EXCLUDE_PARTS = {".git", ".pytest_cache", ".tmp", "__pycache__", "evidence", "dist"}
+EXCLUDE_PARTS = {".git", ".pytest_cache", ".tmp", "__pycache__", "evidence", "dist", ".mimosa"}
 
 
 def main():

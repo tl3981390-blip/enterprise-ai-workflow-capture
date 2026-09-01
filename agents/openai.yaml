@@ -1,4 +1,4 @@
 interface:
   display_name: "Enterprise AI Workflow Capture"
-  short_description: "Capture confirmed human-AI work processes safely"
-  default_prompt: "Use $enterprise-ai-workflow-capture to record and confirm how this task was completed."
+  short_description: "Capture how AI-assisted business tasks were actually completed, safely"
+  default_prompt: "Use $enterprise-ai-workflow-capture to record how this designated task was completed."

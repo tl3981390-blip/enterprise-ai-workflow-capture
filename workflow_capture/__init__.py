@@ -1,4 +1,4 @@
 """Enterprise AI workflow capture core."""
 
-__version__ = "1.0.1"
-SCHEMA_VERSION = 3
+__version__ = "2.0.0"
+SCHEMA_VERSION = 4

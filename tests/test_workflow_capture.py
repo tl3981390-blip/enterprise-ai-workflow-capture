@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from workflow_capture import SCHEMA_VERSION
 from workflow_capture.database import MIGRATIONS, connect, current_version, migrate, verify_evidence_chains
 from workflow_capture.errors import ConfirmationError, MigrationError, ValidationError
 from workflow_capture.service import commit, confirm, prepare, show, similar
@@ -138,7 +139,7 @@ class CaptureAcceptanceTests(unittest.TestCase):
         self.assertEqual(lineage_count, 1)
         self.assertIsNotNone(knowledge_table)
 
-    def test_11_schema_v2_migrates_to_v3_and_old_data_reads(self):
+    def test_11_schema_v2_migrates_to_latest_and_old_data_reads(self):
         connection = connect(self.db)
         connection.executescript(MIGRATIONS[1])
         connection.execute("INSERT INTO schema_migrations VALUES (1, '2026-01-01T00:00:00Z', ?)", (digest(MIGRATIONS[1].encode()),))
@@ -167,10 +168,10 @@ class CaptureAcceptanceTests(unittest.TestCase):
         artifact = prepare(candidate("new-after-migration"), self.db)
         confirmed = confirm(artifact, self.db, method="test_explicit_human")
         result = commit(confirmed, self.db)
-        self.assertEqual(show(self.db, result["task_id"])["schema_version"], 3)
+        self.assertEqual(show(self.db, result["task_id"])["schema_version"], SCHEMA_VERSION)
         connection = connect(self.db)
         try:
-            self.assertEqual(current_version(connection), 3)
+            self.assertEqual(current_version(connection), SCHEMA_VERSION)
         finally:
             connection.close()
 
