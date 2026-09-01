@@ -1,0 +1,16 @@
+{
+  "plan_id": "eawc-v201-delivery-plan",
+  "contract_ref": "evidence/v2.0.1-task-understanding-contract.json",
+  "phases": ["CONSTRUCTION", "TRUST_TESTS", "DOCS", "PRE_RELEASE", "RELEASE_v2.0.1"],
+  "actions": [
+    {"name": "B01-authorization-rework", "description": "修改 workflow_capture/authorization.py：Ed25519 assertion 验证、受信根、VerifiedHarnessCaptureContext、dev 降级", "target": "workflow_capture/authorization.py", "phase": "CONSTRUCTION"},
+    {"name": "B02-validation-guard", "description": "修改 workflow_capture/validation.py：禁止信任根自选字段与 enterprise untrusted 阶段校验", "target": "workflow_capture/validation.py", "phase": "CONSTRUCTION"},
+    {"name": "B03-service-chain", "description": "修改 workflow_capture/service.py：capture() 改为验证后注入的可信执行链", "target": "workflow_capture/service.py", "phase": "CONSTRUCTION"},
+    {"name": "B04-cli-doctor", "description": "修改 workflow_capture/cli.py：doctor 报告信任面，不泄露密钥", "target": "workflow_capture/cli.py", "phase": "CONSTRUCTION"},
+    {"name": "B05-scripts-test-only", "description": "scripts/：make_grant.py 改名为 make_test_grant.py；新建 make_test_assertion.py（测试 signer，拒绝生产 trust class）；新建 check_release_hygiene.py", "target": "scripts/", "phase": "CONSTRUCTION"},
+    {"name": "B06-trust-tests", "description": "tests/ 新建 test_trust_boundary.py（TRUST-001~013 与模式强制）；既有测试加强 trust_class 断言", "target": "tests/", "phase": "TRUST_TESTS"},
+    {"name": "B07-docs", "description": "修改 README.md、SKILL.md、references/、docs/、examples/、CHANGELOG.md、版本元数据 2.0.1", "target": "README.md SKILL.md references/ docs/ examples/ CHANGELOG.md pyproject.toml", "phase": "DOCS"},
+    {"name": "B08-pre-release", "description": "全量回归 + clean install + Fresh 宿主环境模拟 + discovery 检查 + evidence/v2.0.1-*.md", "target": "evidence/", "phase": "PRE_RELEASE"},
+    {"name": "B09-release", "description": "dist/ 构建 v2.0.1 zip；git tag v2.0.1；push；GitHub Release v2.0.1；下载回验；只读核验 v2.0.0 完好", "target": "dist/ git tag v2.0.1 GitHub Release v2.0.1", "phase": "RELEASE_v2.0.1"}
+  ]
+}

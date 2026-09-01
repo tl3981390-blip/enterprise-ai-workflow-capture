@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Issue a local-testing authorization grant signed with the environment key.
+"""LOCAL TESTING ONLY — issue a development grant signed with an env-held key.
 
-Deployment tooling, not part of the capture path. The signing key is read only
-from WORKFLOW_CAPTURE_AUTHORIZATION_KEY. Example:
+This output is DEVELOPMENT_TEST_ONLY: it can never produce production
+enterprise authority, and the runtime refuses it when
+WORKFLOW_CAPTURE_MODE=PRODUCTION_ENTERPRISE. Production assertions are issued
+by the harness/enterprise deployment with an asymmetric private key that never
+appears in this repository or in the model's environment.
+
+The signing key is read only from WORKFLOW_CAPTURE_AUTHORIZATION_KEY. Example:
 
     WORKFLOW_CAPTURE_AUTHORIZATION_KEY=<local-test-key> \
-    python scripts/make_grant.py --output grant.json \
+    python scripts/make_test_grant.py --output grant.json \
         --grant-id grant_local_001 --issuer local-test-harness \
         --task-types supplier-quote-comparison --departments procurement \
         --storage-adapter local_sqlite --days 90
@@ -22,12 +27,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from workflow_capture.authorization import ENV_GRANT_KEY
+from workflow_capture.authorization import ENV_GRANT_KEY, TRUST_CLASS_DEVELOPMENT
 from workflow_capture.util import canonical_json
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Issue a signed local-testing authorization grant")
+    parser = argparse.ArgumentParser(description="Issue a DEVELOPMENT_TEST_ONLY local grant (never production authority)")
     parser.add_argument("--output", required=True)
     parser.add_argument("--grant-id", required=True)
     parser.add_argument("--issuer", required=True)
@@ -40,7 +45,7 @@ def main():
     args = parser.parse_args()
     key = os.environ.get(ENV_GRANT_KEY)
     if not key:
-        raise SystemExit(f"{ENV_GRANT_KEY} is required to sign a grant")
+        raise SystemExit(f"{ENV_GRANT_KEY} is required to sign a local test grant")
     now = datetime.now(timezone.utc)
     grant = {
         "grant_version": 1,
@@ -48,6 +53,7 @@ def main():
         "issuer": args.issuer,
         "mode": args.mode,
         "capture_authorized": True,
+        "trust_class": TRUST_CLASS_DEVELOPMENT,
         "capture_scope": {"task_types": args.task_types, "departments": args.departments},
         "storage_scope": {"adapter": args.storage_adapter},
         "retention_policy": args.retention_policy,
@@ -58,7 +64,8 @@ def main():
     target = Path(args.output)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(grant, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"status": "issued", "output": str(target), "grant_id": args.grant_id, "verification": "hmac_sha256"}, ensure_ascii=False))
+    print(json.dumps({"status": "issued", "trust_class": TRUST_CLASS_DEVELOPMENT, "output": str(target), "grant_id": args.grant_id}, ensure_ascii=False))
+    print("WARNING: this grant is DEVELOPMENT_TEST_ONLY and cannot authorize production enterprise capture", file=sys.stderr)
     return 0
 
 

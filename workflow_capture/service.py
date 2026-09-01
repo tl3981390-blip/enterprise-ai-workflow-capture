@@ -1,12 +1,21 @@
 import json
+import os
 from pathlib import Path
 
-from .authorization import load_grant, require_enterprise_capture
+from .authorization import (
+    ENV_ASSERTION,
+    TRUST_CLASS_DEVELOPMENT,
+    enforce_candidate_within_context,
+    inject_trusted_context,
+    load_grant,
+    require_enterprise_capture,
+    verify_capture_assertion,
+)
 from .errors import CaptureError, CaptureStorageError, ConfirmationError, StorageError
 from .redaction import sanitize
 from .storage import resolve_adapter
 from .util import payload_digest
-from .validation import validate_candidate
+from .validation import validate_candidate, validate_enterprise_untrusted
 
 
 def prepare(candidate, db_path):
@@ -92,18 +101,34 @@ def commit(confirmation, db_path):
 def capture(candidate, db_path=None, env=None):
     """Enterprise-managed one-shot capture.
 
-    One mechanical pass under a harness-provided Enterprise Capture
-    Authorization: validate → authorize (fail closed) → sanitize → validate →
-    idempotent persist → read-back verify. No interactive confirmation; the
-    authorized invocation itself is the approved entry action. Storage failure
-    is reported honestly as TASK_COMPLETED_CAPTURE_FAILED and never disguised
-    as either task failure or successful persistence.
+    Trusted chain: validate the untrusted candidate → obtain and verify the
+    harness assertion (fail closed) → build the VerifiedHarnessCaptureContext →
+    check the candidate against the verified scope → inject harness-owned
+    session/context → sanitize → validate the final record → persist
+    idempotently → read-back verify. The candidate can never supply
+    authorization, session identity, or harness-provenance context.
+
+    When no assertion is configured, the legacy local grant path runs in
+    DEVELOPMENT_TEST_ONLY trust class (never production authority). Storage
+    failure is reported honestly as TASK_COMPLETED_CAPTURE_FAILED and never
+    disguised as either task failure or successful persistence.
     """
+    env = os.environ if env is None else env
     validate_candidate(candidate)
     adapter = resolve_adapter(db_path, env=env)
-    grant = load_grant(env=env)
-    authorization_record = require_enterprise_capture(grant, candidate, adapter.kind)
-    sanitized, findings = sanitize(candidate)
+    if (env.get(ENV_ASSERTION) or "").strip():
+        validate_enterprise_untrusted(candidate)
+        context = verify_capture_assertion(env=env)
+        enforce_candidate_within_context(candidate, context, adapter.kind)
+        merged = inject_trusted_context(candidate, context)
+        authorization_record = context.public_record()
+        trust_class = context.trust_class
+    else:
+        grant = load_grant(env=env)
+        authorization_record = require_enterprise_capture(grant, candidate, adapter.kind)
+        merged = candidate
+        trust_class = TRUST_CLASS_DEVELOPMENT
+    sanitized, findings = sanitize(merged)
     validate_candidate(sanitized)
     try:
         persisted = adapter.persist_authorized(sanitized, authorization_record)
@@ -120,10 +145,11 @@ def capture(candidate, db_path=None, env=None):
     if persisted.get("pending"):
         return {
             "status": "TASK_COMPLETED_CAPTURE_PENDING",
-            "capture_mode": grant.mode,
+            "capture_mode": "ENTERPRISE_MANAGED_CAPTURE",
             "capture_session_id": sanitized.get("capture_session_id"),
             "storage": adapter.kind,
             "authorization": authorization_record,
+            "trust_class": trust_class,
             "read_back_ok": False,
         }
     task_id = persisted["task_id"]
@@ -140,7 +166,7 @@ def capture(candidate, db_path=None, env=None):
         raise CaptureStorageError("stored record does not prove persisted status; persistence is not claimed")
     return {
         "status": "TASK_COMPLETED_CAPTURE_PERSISTED",
-        "capture_mode": grant.mode,
+        "capture_mode": "ENTERPRISE_MANAGED_CAPTURE",
         "task_id": task_id,
         "capture_session_id": sanitized.get("capture_session_id"),
         "idempotent_replay": bool(persisted.get("duplicate")),
@@ -148,6 +174,7 @@ def capture(candidate, db_path=None, env=None):
         "schema_version": stored["schema_version"],
         "storage": adapter.kind,
         "authorization": authorization_record,
+        "trust_class": trust_class,
         "redactions": [{"category": f.category, "path": f.path} for f in findings],
         "read_back_ok": True,
     }

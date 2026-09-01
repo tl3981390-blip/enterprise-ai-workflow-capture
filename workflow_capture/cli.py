@@ -5,7 +5,7 @@ import sqlite3
 import sys
 
 from . import SCHEMA_VERSION, __version__
-from .authorization import ENV_GRANT_FILE, load_grant
+from .authorization import ENV_ASSERTION, ENV_GRANT_FILE, ENV_MODE, ENV_TRUST_ROOT, load_grant
 from .errors import AuthorizationError, CaptureError, CaptureStorageError, ConfirmationError
 from .service import capture, commit, confirm, load_json, prepare, save_json, show, similar
 from .storage import resolve_adapter
@@ -100,11 +100,16 @@ def run(args):
         except CaptureError as exc:
             result["storage"] = {"configured": False, "error": str(exc)}
             result["status"] = "error"
-        result["authorization"] = {"configured": bool(os.environ.get(ENV_GRANT_FILE, "").strip())}
-        if result["authorization"]["configured"]:
+        result["authorization"] = {
+            "assertion_configured": bool(os.environ.get(ENV_ASSERTION, "").strip()),
+            "trust_root_configured": bool(os.environ.get(ENV_TRUST_ROOT, "").strip()),
+            "mode_enforced": os.environ.get(ENV_MODE, "").strip() or None,
+            "dev_grant_configured": bool(os.environ.get(ENV_GRANT_FILE, "").strip()),
+        }
+        if result["authorization"]["dev_grant_configured"] and not result["authorization"]["assertion_configured"]:
             try:
                 grant = load_grant()
-                result["authorization"].update({"mode": grant.mode, "issuer": grant.issuer, "verification": grant.verification, "expires_at": grant.data["expires_at"]})
+                result["authorization"].update({"mode": grant.mode, "issuer": grant.issuer, "verification": grant.verification, "trust_class": "DEVELOPMENT_TEST_ONLY", "expires_at": grant.data["expires_at"]})
             except AuthorizationError as exc:
                 result["authorization"]["error"] = str(exc)
                 result["status"] = "error"

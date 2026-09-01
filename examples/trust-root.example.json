@@ -1,0 +1,8 @@
+{
+  "_comment": "Template only. The trust root is deployment-protected configuration pinning trusted issuers to Ed25519 public keys; the model can never select it. trust_class PRODUCTION_ENTERPRISE is established by the enterprise deployment, never by a candidate, a CLI flag, or a local test tool.",
+  "trust_root_version": 1,
+  "trust_class": "PRODUCTION_ENTERPRISE",
+  "trusted_issuers": {
+    "enterprise-harness": {"algorithm": "Ed25519", "key_id": "ent-key-1", "public_key": "REPLACE_ME base64 Ed25519 public key"}
+  }
+}

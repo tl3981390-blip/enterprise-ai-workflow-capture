@@ -4,13 +4,15 @@ Use a versioned GitHub Release asset, not a moving branch archive. Verify the as
 
 ## Enterprise configuration (harness/deployment)
 
-- `WORKFLOW_CAPTURE_AUTHORIZATION_FILE` — path to the enterprise-issued authorization grant (see `references/enterprise-authorization.md`).
-- `WORKFLOW_CAPTURE_AUTHORIZATION_KEY` — optional HMAC key verifying signed grants.
+- `WORKFLOW_CAPTURE_ASSERTION` — path to the per-capture Ed25519-signed harness assertion (see `references/enterprise-authorization.md`).
+- `WORKFLOW_CAPTURE_TRUST_ROOT` — path to the deployment-protected trust root (trusted issuers → public keys). The model can never select it.
+- `WORKFLOW_CAPTURE_MODE` — optional `PRODUCTION_ENTERPRISE` / `DEVELOPMENT_TEST` enforcement.
+- `WORKFLOW_CAPTURE_AUTHORIZATION_FILE` / `WORKFLOW_CAPTURE_AUTHORIZATION_KEY` — legacy local grant channel; DEVELOPMENT_TEST_ONLY.
 - `WORKFLOW_CAPTURE_STORAGE` — `local_sqlite` (default) or `enterprise_adapter`.
 - `WORKFLOW_CAPTURE_STORAGE_ADAPTER_MODULE` — enterprise-supplied adapter module implementing `references/storage-adapter-contract.md`.
 - `WORKFLOW_CAPTURE_DB` — default local database path when `--db` is omitted.
 
-Credentials live only in environment variables or the enterprise key service — never in this repository, candidate payloads, or CLI flags.
+Attested verification requires the `cryptography` package (`pip install cryptography` or the `enterprise` extra). Credentials and private keys live only with the harness/enterprise deployment or a key service — never in this repository, candidate payloads, or CLI flags. The Skill ships no production signer.
 
 ## Update
 

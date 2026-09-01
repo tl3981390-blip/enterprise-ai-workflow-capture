@@ -20,7 +20,7 @@ Business identity uses prefixed UUIDs (`task_…`, `process_…`, `step_…`, `e
 - `started_at` / `completed_at` — task timing when truly known;
 - `business_context_ref_hash` + `business_context_json` — business reference hashed, department/workflow only when harness-provided;
 - `ai_context_json` — model/provider/skill/version with provenance, only when truly known;
-- `authorization_json` — public authorization record (grant id, issuer, verification level); never keys or signatures.
+- `authorization_json` — public authorization record: assertion/grant id, issuer, verification level (`asymmetric_signature_verified` or `development_test_only`), trust class (`PRODUCTION_ENTERPRISE` / `DEVELOPMENT_TEST_ONLY`), retention policy reference; never keys, signatures, or secrets.
 
 `steps` additionally carries `occurred_at`, `duration_ms`, `capability_json` (model/skill/tool identity) and `intervention_json` (human edit reason, rework flag, affected step). `derived_knowledge` gains `sample_size`.
 

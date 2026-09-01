@@ -15,6 +15,8 @@ VERIFICATION_STATES = {"verified", "unverified"}
 # Records describe workflows, never people. Scoring/ranking fields are rejected
 # mechanically. Authorization claims inside a payload are self-authorization
 # attempts: the authorization fact comes only from the harness environment.
+# Trust-root/verifier/key/issuer fields are likewise forbidden: the host model
+# can never select the trust root, the verifier, or the trusted issuer.
 FORBIDDEN_KEYS = {
     "employee_score",
     "ai_usage_score",
@@ -29,6 +31,16 @@ FORBIDDEN_KEYS = {
     "authorization_grant",
     "grant",
     "grant_id",
+    "trust_root",
+    "trust_class",
+    "public_key",
+    "private_key",
+    "verification_key",
+    "verifier",
+    "assertion",
+    "assertion_id",
+    "issuer",
+    "signature",
 }
 
 MAX_EXCERPT_LENGTH = 2000
@@ -113,6 +125,47 @@ def _validate_ai_context(value, errors):
     for field in ("model", "provider", "skill", "version"):
         if field in value and value[field] is not None and not isinstance(value[field], str):
             errors.append(f"ai_context.{field} must be a string when supplied")
+
+
+def validate_enterprise_untrusted(data):
+    """Extra rules for a candidate submitted to enterprise-managed capture
+    *before* harness verification. Harness-owned identity and context may only
+    ever come from a verified assertion, so the untrusted candidate must not
+    carry them at all.
+
+    - no capture_session_id (injected from the verified assertion);
+    - no business_context provenance claim of harness_provided;
+    - no harness-owned business_context fields (department/workflow/ref);
+    - no ai_context claiming harness provenance.
+    """
+    errors = []
+    if isinstance(data, dict) and data.get("capture_session_id") is not None:
+        errors.append(
+            "capture_session_id is harness-owned: enterprise candidates must not supply it; "
+            "the runtime injects it from the verified harness assertion"
+        )
+    context = data.get("business_context") if isinstance(data, dict) else None
+    if isinstance(context, dict):
+        if context.get("provenance") == "harness_provided":
+            errors.append(
+                "business_context.provenance harness_provided cannot be claimed by a candidate; "
+                "it is injected only from a verified harness assertion"
+            )
+        for field in ("department", "workflow", "ref"):
+            if context.get(field) is not None:
+                errors.append(
+                    f"business_context.{field} is harness-owned in enterprise capture and must come "
+                    "from the verified assertion, not from the candidate"
+                )
+    ai_context = data.get("ai_context") if isinstance(data, dict) else None
+    if isinstance(ai_context, dict) and ai_context.get("provenance") == "harness_provided":
+        errors.append(
+            "ai_context.provenance harness_provided cannot be claimed by a candidate; "
+            "it is injected only from a verified harness assertion"
+        )
+    if errors:
+        raise ValidationError("; ".join(errors))
+    return data
 
 
 def validate_candidate(data):

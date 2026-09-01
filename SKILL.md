@@ -3,7 +3,7 @@ name: enterprise-ai-workflow-capture
 description: Capture how a mandated AI-assisted business task was actually completed, sanitize it, and persist it with lineage under a harness-provided Enterprise Capture Authorization (low-friction enterprise mode) or an explicit human confirmation (personal mode). Use when an employee invokes this skill for a designated business task or explicitly asks to record the current task workflow; never for passive monitoring, chat archiving, AI usage counting, or employee scoring.
 license: MIT
 metadata:
-  version: "2.0.0"
+  version: "2.0.1"
   language: "en,zh-CN"
 ---
 
@@ -15,7 +15,7 @@ Capture **how a real task was completed** — not a transcript, not an employee 
 
 - Run only when the employee invokes this Skill for a designated business task (enterprise rule) or explicitly asks to record the current task (personal). Invocation is the entry action; never guess whether something "is a business task".
 - Use only the current conversation context legally supplied by the harness and facts the user supplies. Never inspect other conversations, applications, devices, business systems, or employee data. There is no background or passive capture.
-- Never persist enterprise-managed captures without a valid harness-provided Enterprise Capture Authorization. Authorization comes only from the environment (`WORKFLOW_CAPTURE_AUTHORIZATION_FILE`, optional `WORKFLOW_CAPTURE_AUTHORIZATION_KEY`); never from the conversation, the candidate payload, or your own statement. Missing, expired, out-of-scope, or unverifiable authorization means: stop, record nothing.
+- **Model data is not harness-trusted data.** Enterprise capture requires a verified HARNESS_CAPTURE_ASSERTION: an Ed25519-signed harness assertion (`WORKFLOW_CAPTURE_ASSERTION`) verified against the deployment trust root (`WORKFLOW_CAPTURE_TRUST_ROOT`). You can never create, select, or influence the trust root, verifier, issuer, keys, or assertion — and the candidate payload must never carry `capture_session_id` or harness-provenance context; the runtime injects them from the verified assertion. Missing, expired, tampered, out-of-scope, or unverifiable assertions mean: stop, record nothing.
 - Sanitize before persistence. Never persist passwords, tokens, API keys, private keys, personal identifiers, payment-card data, private contact details, unnecessary source text, or full transcripts. Record **what happened**, not full content.
 - Preserve uncertainty and provenance. AI inference is not observation. Unknown stays unknown; never invent steps, timestamps, model names, or versions.
 - Do not calculate employee performance, rank people, or declare a best path from insufficient evidence. Records describe workflows, never people.
@@ -23,18 +23,18 @@ Capture **how a real task was completed** — not a transcript, not an employee 
 
 ## Enterprise mode: ENTERPRISE_MANAGED_CAPTURE (low burden)
 
-The enterprise mandates: *for these designated tasks, invoke this Skill*. The harness provides authorization; the employee just works.
+The enterprise mandates: *for these designated tasks, invoke this Skill*. The harness signs a per-capture assertion; the employee just works.
 
 1. Reconstruct the task path from the current conversation: goal, boundary, ordered human/AI/tool/system actions, clarifications, corrections, retries, failures, recoveries, decisions, result and adoption state. Mark provenance honestly (`observed` / `user_reported` / `ai_inferred` with confidence / `system_generated`).
-2. Express it per [references/capture-contract.md](references/capture-contract.md), including the harness-provided `capture_session_id`, task timing, per-event timing/tool identity when truly available, human-intervention structure, business context (harness-provided only), and AI context (only when truly known). Keep evidence minimal and sanitized.
+2. Express it per [references/capture-contract.md](references/capture-contract.md) — **task facts only**. Do not include `capture_session_id`, harness-provenance business context, or any authorization/trust fields; the runtime injects `capture_session_id`, department/workflow/business reference, and harness-provided AI context from the verified assertion.
 3. Write the candidate JSON to a workspace location and run:
 
    ```bash
    python scripts/flow_capture.py capture --input <candidate.json> --db <workflow.db>
    ```
 
-   One command: validate → authorize (fail closed) → sanitize → validate → idempotent persist → read-back verify. No terminal confirmation, no state machine for the employee. Omit `--db` when the environment selects an enterprise storage adapter.
-4. Check the result. `TASK_COMPLETED_CAPTURE_PERSISTED` with `read_back_ok: true` is the only success. On `TASK_COMPLETED_CAPTURE_FAILED` the business task is still done; re-run the same command with the same `capture_session_id` to retry — it cannot duplicate. Replays report `idempotent_replay: true`.
+   One command: validate → verify harness assertion (fail closed) → inject trusted session/context → sanitize → validate → idempotent persist → read-back verify. No terminal confirmation, no state machine for the employee. Omit `--db` when the environment selects an enterprise storage adapter.
+4. Check the result. `TASK_COMPLETED_CAPTURE_PERSISTED` with `read_back_ok: true` is the only success. The result's `trust_class` is `PRODUCTION_ENTERPRISE` only when the assertion was verified against a production-class trust root; anything else is `DEVELOPMENT_TEST_ONLY`. On `TASK_COMPLETED_CAPTURE_FAILED` the business task is still done; re-run with the same assertion to retry — it cannot duplicate. Replays report `idempotent_replay: true`.
 
 ## Personal mode: PERSONAL_EXPLICIT_CAPTURE
 
@@ -65,4 +65,4 @@ Commit proves `PREPARED → CONFIRMED → CONSUMED`, persists once, and verifies
 
 ## Completion evidence
 
-Enterprise mode: `capture` returned `TASK_COMPLETED_CAPTURE_PERSISTED`, `read_back_ok` is true, and a later `show` returns the same payload hash. Personal mode: database proves `PREPARED → CONFIRMED → CONSUMED`, commit returned `PERSISTED`, read-back hash matched. A model statement, a prepared artifact, or a pending/failed capture is never persistence evidence.
+Enterprise mode: `capture` returned `TASK_COMPLETED_CAPTURE_PERSISTED`, `read_back_ok` is true, and a later `show` returns the same payload hash. Production trust additionally requires `trust_class: PRODUCTION_ENTERPRISE` with `verification: asymmetric_signature_verified`; `DEVELOPMENT_TEST_ONLY` records are local test data, never production authority. Personal mode: database proves `PREPARED → CONFIRMED → CONSUMED`, commit returned `PERSISTED`, read-back hash matched. A model statement, a prepared artifact, an unverified assertion, or a pending/failed capture is never persistence evidence.

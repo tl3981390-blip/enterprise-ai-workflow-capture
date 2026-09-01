@@ -1,43 +1,74 @@
 # Enterprise Capture Authorization
 
-Enterprise-managed capture runs only under a harness-provided authorization grant. The Skill never decides on its own that it may capture; the enterprise/harness supplies the authorization fact through the environment, and the runtime fails closed whenever that fact is missing, malformed, expired, out of scope, or unverifiable.
+Enterprise-managed capture runs only under a **verified harness assertion**. The Skill never decides on its own that it may capture, and the host model can never create enterprise authority: it cannot mint assertions, select the trust root, choose the verifier, or claim harness provenance as a string.
 
-## Provided by the harness / enterprise deployment
+## Trust model
+
+```text
+Harness / Enterprise deployment (holds the Ed25519 private key, outside this Skill)
+  → signs a per-capture HARNESS_CAPTURE_ASSERTION
+  → runtime verifies it against the deployment-protected trust root
+  → only then does a VerifiedHarnessCaptureContext exist
+  → capture_session_id and harness-owned context are injected from it
+```
+
+The runtime contains **no signer**. `scripts/make_test_grant.py` and `scripts/make_test_assertion.py` are LOCAL TESTING ONLY: their outputs carry `trust_class = DEVELOPMENT_TEST_ONLY` and are refused whenever `WORKFLOW_CAPTURE_MODE=PRODUCTION_ENTERPRISE`.
+
+## Environment interface (provided by the harness / deployment)
 
 | Environment variable | Meaning |
 |---|---|
-| `WORKFLOW_CAPTURE_AUTHORIZATION_FILE` | Path to the grant JSON issued by the enterprise/harness. |
-| `WORKFLOW_CAPTURE_AUTHORIZATION_KEY` | Optional HMAC-SHA256 verification key. When set, every grant must carry a valid `signature`. Kept only in the environment or a key service — never in this repository, a payload, or a CLI flag. |
+| `WORKFLOW_CAPTURE_ASSERTION` | Path to the per-capture signed assertion JSON. |
+| `WORKFLOW_CAPTURE_TRUST_ROOT` | Path to the deployment-protected trust root JSON pinning trusted issuers to Ed25519 public keys. |
+| `WORKFLOW_CAPTURE_MODE` | Optional explicit enforcement: `PRODUCTION_ENTERPRISE` or `DEVELOPMENT_TEST`. A class mismatch fails closed. |
+| `WORKFLOW_CAPTURE_AUTHORIZATION_FILE` / `WORKFLOW_CAPTURE_AUTHORIZATION_KEY` | Legacy local grant channel — DEVELOPMENT_TEST_ONLY, refused under `PRODUCTION_ENTERPRISE`. |
 
-The grant:
+The assertion:
 
 ```json
 {
-  "grant_version": 1,
-  "grant_id": "grant_…",
-  "issuer": "harness/enterprise identifier",
-  "mode": "ENTERPRISE_MANAGED_CAPTURE",
+  "assertion_version": 1,
+  "assertion_id": "unique assertion identity",
+  "issuer": "trusted issuer name pinned in the trust root",
+  "key_id": "optional pinned key identifier",
   "capture_authorized": true,
+  "mode": "ENTERPRISE_MANAGED_CAPTURE",
+  "capture_session_id": "harness-owned idempotency identity",
   "capture_scope": {"task_types": ["supplier-quote-comparison"], "departments": ["procurement"]},
+  "business_context": {"department": "procurement", "workflow": "sourcing", "business_context_ref": "po-…"},
   "storage_scope": {"adapter": "local_sqlite"},
   "retention_policy": "enterprise policy reference",
   "issued_at": "ISO-8601",
   "expires_at": "ISO-8601",
-  "signature": "hex HMAC-SHA256 over the grant without this field (optional)"
+  "nonce": "unique per assertion",
+  "signature": "base64 Ed25519 over this object without the signature field"
 }
 ```
 
-`"*"` (or a list containing `"*"`) in a scope list means unrestricted within that dimension. `task_types` and `departments` are matched on normalized labels.
+The trust root:
+
+```json
+{
+  "trust_root_version": 1,
+  "trust_class": "PRODUCTION_ENTERPRISE",
+  "trusted_issuers": {
+    "enterprise-harness": {"algorithm": "Ed25519", "key_id": "ent-key-1", "public_key": "base64"}
+  }
+}
+```
 
 ## Mechanical rules
 
-1. The grant path and the key come only from the environment. A candidate payload, CLI flag, or conversation message carrying anything like `capture_authorized` / `authorization` / `grant_id` is rejected as a self-authorization attempt.
-2. Missing file, unreadable file, missing required fields, `capture_authorized` not exactly `true`, unknown `mode`, malformed timestamps, or an expired grant → refuse, persist nothing (exit code 4).
-3. Signature discipline: key configured + unsigned grant → refuse; key configured + bad signature → refuse; signature present + no key configured → refuse (unverifiable grants are not silently trusted). Only key configured + valid signature reports `hmac_sha256_verified`; an unsigned grant without a configured key is recorded honestly as `harness_asserted_unverified`.
-4. Scope checks per capture: `task_type` inside `capture_scope.task_types`; the configured storage adapter kind inside `storage_scope.adapter`; harness-provided `department` inside `capture_scope.departments` (when restricted).
-5. Enterprise mode requires the grant `mode` = `ENTERPRISE_MANAGED_CAPTURE` and a harness-provided `capture_session_id`. Personal explicit capture does not consult the grant.
-6. Every persisted enterprise record carries a public authorization record (grant id, issuer, mode, retention policy reference, verification level, check time) — never the key or the signature.
+1. The trust root and assertion come only from the environment; candidates and CLI flags cannot select them. Payload fields such as `trust_root`, `public_key`, `verifier`, `issuer`, `assertion`, `signature`, `capture_authorized` are rejected mechanically.
+2. Missing configuration, untrusted issuer, key mismatch, bad signature, expired or malformed assertion, missing session binding → refuse, persist nothing (exit code 4).
+3. The assertion binds session, task scope, storage scope, business context, issuer, validity window and identity. Tampering with any signed field fails verification. The candidate's `task_type` and the configured storage adapter must be inside the verified scopes.
+4. `capture_session_id` exists only inside the verified context. A candidate carrying it is rejected. The same holds for `business_context.department/workflow/ref` and any `harness_provided` provenance claim — the runtime injects them from the verified assertion.
+5. The persisted authorization record stores `assertion_id`, `issuer`, `verification: asymmetric_signature_verified`, `trust_class`, `retention_policy`, `verified_at` — never keys, signatures, or verifier internals.
+6. `DEVELOPMENT_TEST_ONLY` results are local test data. They must never be presented as production enterprise security evidence.
 
-## Deployment note
+## Development and production
 
-`scripts/make_grant.py` issues a signed grant for local testing using the key from the environment. In production, grant issuance, key distribution, identity, SSO, retention and deletion are harness/enterprise responsibilities — outside this Skill.
+- **Production**: harness signs per-capture assertions; the trust root is deployment-protected configuration. Requires the `cryptography` package (Ed25519).
+- **Development**: `scripts/make_test_assertion.py` mints a throwaway-key test assertion + dev trust root for local exercise of the full asymmetric path; `scripts/make_test_grant.py` mints legacy HMAC test grants. Both are marked and refused in production mode.
+
+Grant/assertion issuance, private-key custody, trust-root protection, identity, SSO, retention and deletion are harness/enterprise responsibilities — outside this Skill.

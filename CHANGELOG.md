@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.1 - 2026-09-01
+
+Security boundary patch: harness-trusted inputs are now actually attested. No product redesign; all v2.0.0 product behaviors preserved.
+
+- Root cause closed: the host model could previously self-authorize via unsigned grants, model-environment HMAC signers, self-chosen session ids and `harness_provided` strings.
+- Added HARNESS_CAPTURE_ASSERTION: Ed25519-signed per-capture assertions verified against a deployment trust root; the runtime only verifies and ships no production signer.
+- `capture_session_id` and harness-owned business/AI context are injected only from the verified assertion; candidates carrying them are rejected.
+- Added `VerifiedHarnessCaptureContext`: the single object that may carry harness-trusted facts, constructible only by the verifier.
+- Added trust classes: `PRODUCTION_ENTERPRISE` vs `DEVELOPMENT_TEST_ONLY`; unsigned/HMAC local grants are dev-only and refused under `WORKFLOW_CAPTURE_MODE=PRODUCTION_ENTERPRISE`.
+- Authorization records now carry verification level and trust class, never keys or signatures.
+- `scripts/make_grant.py` replaced by `scripts/make_test_grant.py`; added `scripts/make_test_assertion.py` (throwaway-key local Ed25519 minter) and `scripts/check_release_hygiene.py` (SKILL.md YAML + discovery check).
+- Added TRUST-001…013 adversarial tests; suite now 94 tests (76 preserved).
+- Ed25519 verification uses the mature `cryptography` package (optional `enterprise` extra); no cryptography is implemented in this repository.
+
 ## 2.0.0 - 2026-09-01
 
 Product correction: from "occasionally save a chat workflow after interactive confirmation" to "low-friction, authorized sedimentation of real AI-assisted task paths" — while keeping every v1 truthfulness mechanism.

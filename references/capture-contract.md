@@ -2,11 +2,13 @@
 
 The agent creates this candidate from only the current harness-provided conversation and facts the user supplies. Unknown values remain unknown; do not manufacture continuity, timestamps, model names, or versions.
 
-Required fields: `task_type`, `task_goal`, `steps`, `final_result`. Enterprise-managed capture additionally requires `capture_session_id` (harness-provided idempotency identity).
+Required fields: `task_type`, `task_goal`, `steps`, `final_result`.
+
+**Enterprise-managed capture (v2.0.1+):** the candidate carries *task facts only*. It must **not** contain `capture_session_id`, harness-provenance business context (`business_context.department/workflow/ref` or `provenance: harness_provided`), or harness-provenance `ai_context` — those are harness-owned and are injected by the runtime from the verified assertion. Development/test capture (legacy local grant) still requires `capture_session_id` in the candidate.
 
 ```json
 {
-  "capture_session_id": "harness-provided stable session identity (enterprise mode)",
+  "capture_session_id": "development/test grant path only; forbidden in attested enterprise capture",
   "task_type": "stable business-oriented label",
   "task_goal": "what the employee intended to accomplish",
   "process_summary": "brief reconstruction, not a transcript (max 4000 chars)",
@@ -14,14 +16,11 @@ Required fields: `task_type`, `task_goal`, `steps`, `final_result`. Enterprise-m
   "started_at": "ISO-8601, when truly known",
   "completed_at": "ISO-8601, when truly known",
   "business_context": {
-    "ref": "optional business object reference; hashed before storage",
-    "department": "only when legally provided by the harness",
-    "workflow": "only when legally provided by the harness",
-    "provenance": "harness_provided | user_reported"
+    "provenance": "user_reported (harness_provided is injected by the runtime from the verified assertion)"
   },
   "ai_context": {
     "model": "only with a real source", "provider": "...", "skill": "...", "version": "...",
-    "provenance": "harness_provided | user_reported | observed"
+    "provenance": "user_reported | observed (harness_provided only via verified assertion)"
   },
   "steps": [
     {
@@ -73,6 +72,6 @@ The enterprise event list maps onto `actor` + `event_type`: `HUMAN_ACTION` = `hu
 
 - `confidence` is meaningful only for `ai_inferred` and is then required in `[0, 1]`; it never turns inference into evidence.
 - `content_hash` is forbidden input: the runtime computes it from canonical sanitized internal evidence. External-only evidence must use the separate digest, algorithm, source and verification fields; an external digest is never treated as the runtime's content hash.
-- `capture_session_id` identifies the capture session for idempotency; it is excluded from the content hash so identical work retried under a new session still deduplicates.
-- Fields that score or rank people (`employee_score`, `ai_usage_score`, rankings, …) are rejected mechanically. Fields that claim authorization (`capture_authorized`, `authorization`, `grant_id`, …) are rejected mechanically: authorization is a harness-provided environment fact, never payload content.
+- `capture_session_id` identifies the capture session for idempotency; it is excluded from the content hash so identical work retried under a new session still deduplicates. In attested enterprise capture it comes only from the verified assertion.
+- Fields that score or rank people (`employee_score`, `ai_usage_score`, rankings, …) are rejected mechanically. Fields that claim authorization or select trust (`capture_authorized`, `authorization`, `grant_id`, `trust_root`, `public_key`, `verifier`, `issuer`, `assertion`, `signature`, …) are rejected mechanically: authority is a verified harness fact, never payload content.
 - `business_context.ref` and every `external_references.external_id` are hashed before persistence.

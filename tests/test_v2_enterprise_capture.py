@@ -152,7 +152,10 @@ class EnterpriseCaptureTests(unittest.TestCase):
         self.assertEqual(result["capture_mode"], "ENTERPRISE_MANAGED_CAPTURE")
         self.assertTrue(result["read_back_ok"])
         self.assertFalse(result["idempotent_replay"])
-        self.assertEqual(result["authorization"]["verification"], "harness_asserted_unverified")
+        self.assertEqual(result["authorization"]["verification"], "development_test_only")
+        self.assertEqual(result["authorization"]["dev_mechanism"], "harness_asserted_unverified")
+        self.assertEqual(result["authorization"]["trust_class"], "DEVELOPMENT_TEST_ONLY")
+        self.assertEqual(result["trust_class"], "DEVELOPMENT_TEST_ONLY")
         stored = show(self.db, result["task_id"])
         self.assertEqual(stored["capture"]["capture_status"], "TASK_COMPLETED_CAPTURE_PERSISTED")
         self.assertEqual(stored["capture"]["capture_session_id"], "session-001")
@@ -206,7 +209,8 @@ class EnterpriseCaptureTests(unittest.TestCase):
         grant = write_grant(self.temp.name, signed_key=TEST_HMAC_KEY)
         with capture_env(WORKFLOW_CAPTURE_AUTHORIZATION_FILE=grant, WORKFLOW_CAPTURE_AUTHORIZATION_KEY=TEST_HMAC_KEY):
             result = capture(enterprise_candidate(session="signed-1"), self.db)
-        self.assertEqual(result["authorization"]["verification"], "hmac_sha256_verified")
+        self.assertEqual(result["authorization"]["dev_mechanism"], "hmac_sha256_verified")
+        self.assertEqual(result["authorization"]["trust_class"], "DEVELOPMENT_TEST_ONLY")
 
     def test_storage_timeout_fails_honestly_then_retry_persists_once(self):
         grant = write_grant(self.temp.name, storage_adapter="enterprise_flaky")
@@ -623,14 +627,17 @@ class CliIntegrationTests(unittest.TestCase):
         bare = self.run_cli("doctor")
         self.assertEqual(bare.returncode, 0, bare.stderr)
         report = json.loads(bare.stdout)
-        self.assertEqual(report["package_version"], "2.0.0")
-        self.assertFalse(report["authorization"]["configured"])
+        self.assertEqual(report["package_version"], "2.0.1")
+        self.assertFalse(report["authorization"]["assertion_configured"])
+        self.assertFalse(report["authorization"]["trust_root_configured"])
+        self.assertFalse(report["authorization"]["dev_grant_configured"])
         grant = write_grant(self.temp.name)
         configured = self.run_cli("doctor", env_overrides={"WORKFLOW_CAPTURE_AUTHORIZATION_FILE": grant})
         self.assertEqual(configured.returncode, 0, configured.stderr)
         auth = json.loads(configured.stdout)["authorization"]
-        self.assertTrue(auth["configured"])
+        self.assertTrue(auth["dev_grant_configured"])
         self.assertEqual(auth["mode"], "ENTERPRISE_MANAGED_CAPTURE")
+        self.assertEqual(auth["trust_class"], "DEVELOPMENT_TEST_ONLY")
 
 
 if __name__ == "__main__":

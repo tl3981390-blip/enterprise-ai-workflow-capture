@@ -8,7 +8,7 @@ Automatic detection covers common credentials, bearer tokens, JWTs, OpenAI/GitHu
 
 ## Two lawful capture modes
 
-**Enterprise-managed capture** runs under a harness-provided Enterprise Capture Authorization (see [enterprise-authorization.md](enterprise-authorization.md)). Employee invocation under a valid grant is the approved entry action; no per-record interactive confirmation is required. The runtime fails closed without it and never lets a payload authorize itself.
+**Enterprise-managed capture** runs under a verified harness assertion (see [enterprise-authorization.md](enterprise-authorization.md)). Employee invocation under a verified assertion is the approved entry action; no per-record interactive confirmation is required. The runtime fails closed without it, never lets a payload authorize itself, and injects harness-owned context (department/workflow/reference) only from the verified assertion.
 
 **Personal explicit capture** keeps the v1 gate: the preview exposes redaction categories and paths, inferred steps, adoption state, step count and retained evidence; the human confirms interactively; commit atomically consumes the exact-hash-bound confirmation once. Any edit requires a fresh `prepare`.
 

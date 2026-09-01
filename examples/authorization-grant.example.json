@@ -1,5 +1,5 @@
 {
-  "_comment": "Template only. The enterprise/harness issues grants at deployment; scripts/make_grant.py can mint one for local testing using WORKFLOW_CAPTURE_AUTHORIZATION_KEY. This file is not a valid grant.",
+  "_comment": "Template only — DEVELOPMENT_TEST_ONLY. Local grants (scripts/make_test_grant.py) exercise the legacy development path and can never produce production enterprise authority; attested capture uses examples/capture-assertion.example.json + examples/trust-root.example.json.",
   "grant_version": 1,
   "grant_id": "grant_REPLACE_ME",
   "issuer": "REPLACE_ME harness/enterprise identifier",

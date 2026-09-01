@@ -1,0 +1,22 @@
+{
+  "task_type": "supplier-quote-comparison",
+  "task_goal": "Compare three supplier quotes and produce a decision-ready summary",
+  "process_summary": "Compared three quotes, corrected a supplier tax-rate misread, queried internal price history, and added a supply-stability note before adoption.",
+  "prerequisites": ["three supplier quotes", "access to internal price history"],
+  "started_at": "2026-09-01T09:00:00Z",
+  "completed_at": "2026-09-01T09:24:30Z",
+  "steps": [
+    {"actor": "human", "event_type": "action", "summary": "Uploaded three supplier quotes.", "provenance": "observed", "occurred_at": "2026-09-01T09:00:10Z", "duration_ms": 40000, "metadata": {"event_version": 2}},
+    {"actor": "ai", "event_type": "action", "summary": "Extracted prices, lead times and payment terms.", "provenance": "observed", "occurred_at": "2026-09-01T09:01:00Z", "duration_ms": 95000, "capability": {"kind": "model", "name": "example-model", "version": "1.2"}, "metadata": {"event_version": 2}},
+    {"actor": "human", "event_type": "correction", "summary": "Supplier B tax rate was misread; provided the verified rate.", "provenance": "observed", "occurred_at": "2026-09-01T09:05:00Z", "intervention": {"reason": "error", "rework": true, "modified_step": 2}, "metadata": {"event_version": 2}},
+    {"actor": "ai", "event_type": "retry", "summary": "Re-read supplier B quote with the corrected rate.", "provenance": "observed", "duration_ms": 30000, "metadata": {"event_version": 2}},
+    {"actor": "tool", "event_type": "action", "summary": "Queried internal price history.", "provenance": "observed", "capability": {"kind": "tool", "name": "price-history-api", "version": "3"}, "metadata": {"event_version": 2}},
+    {"actor": "ai", "event_type": "result", "summary": "Generated the comparison table.", "provenance": "observed", "metadata": {"event_version": 2}},
+    {"actor": "human", "event_type": "correction", "summary": "Added a supply-stability note to the AI draft.", "provenance": "observed", "intervention": {"reason": "business_preference", "rework": false}, "metadata": {"event_version": 2}},
+    {"actor": "ai", "event_type": "result", "summary": "Produced the final report, which was adopted.", "provenance": "observed", "metadata": {"event_version": 2}}
+  ],
+  "final_result": {"summary": "Supplier comparison report", "adoption_status": "adopted", "quality_notes": "Accepted by the requester without further changes."},
+  "evidence": [{"evidence_type": "conversation_excerpt", "source_ref": "current-session:task", "sanitized_excerpt": "Supplier B tax rate was corrected before the final report.", "provenance": "observed"}],
+  "external_references": [{"namespace": "erp:purchase_order", "external_id": "po-2026-0914", "relation": "subject"}],
+  "harness_metadata": {"harness": "generic", "extension": {}}
+}

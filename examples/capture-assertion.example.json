@@ -1,0 +1,18 @@
+{
+  "_comment": "Template only. The enterprise/harness signs assertions with its own Ed25519 private key at deployment; this file is not a valid assertion. Local test assertions come from scripts/make_test_assertion.py and are DEVELOPMENT_TEST_ONLY.",
+  "assertion_version": 1,
+  "assertion_id": "assertion_REPLACE_ME",
+  "issuer": "REPLACE_ME trusted issuer pinned in the trust root",
+  "key_id": "REPLACE_ME",
+  "capture_authorized": true,
+  "mode": "ENTERPRISE_MANAGED_CAPTURE",
+  "capture_session_id": "harness-owned-session-identity",
+  "capture_scope": {"task_types": ["supplier-quote-comparison"], "departments": ["procurement"]},
+  "business_context": {"department": "procurement", "workflow": "sourcing", "business_context_ref": "po-REPLACE_ME"},
+  "storage_scope": {"adapter": "local_sqlite"},
+  "retention_policy": "REPLACE_ME enterprise retention policy reference",
+  "issued_at": "2026-09-01T00:00:00Z",
+  "expires_at": "2026-12-01T00:00:00Z",
+  "nonce": "REPLACE_ME unique per assertion",
+  "signature": "base64 Ed25519 signature over this object without the signature field"
+}
